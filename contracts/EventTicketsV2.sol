@@ -8,7 +8,10 @@ contract EventTicketsV2 {
     /*
         Define an public owner variable. Set it to the creator of the contract when it is initialized.
     */
-    uint   PRICE_TICKET = 100 wei;
+
+    address payable public owner;
+
+    uint PRICE_TICKET = 100 wei;
 
     /*
         Create a variable to keep track of the event ID numbers.
@@ -21,12 +24,22 @@ contract EventTicketsV2 {
         Choose the appropriate variable type for each field.
         The "buyers" field should keep track of addresses and how many tickets each buyer purchases.
     */
+    struct Event {
+        string description;
+        string website;
+        uint totalTickets;
+        uint sales;
+        mapping(address => uint) buyers;
+        bool isOpen;
 
+    }
     /*
         Create a mapping to keep track of the events.
         The mapping key is an integer, the value is an Event struct.
         Call the mapping "events".
     */
+
+    mapping(uint => Event) allEvents;
 
     event LogEventAdded(string desc, string url, uint ticketsAvailable, uint eventId);
     event LogBuyTickets(address buyer, uint eventId, uint numTickets);
@@ -36,6 +49,31 @@ contract EventTicketsV2 {
     /*
         Create a modifier that throws an error if the msg.sender is not the owner.
     */
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Sender is not an owner");
+        _;
+    }
+
+    modifier isOpen(uint _eventId) {
+        require(allEvents[_eventId].isOpen, "Event is not open");
+        _;
+    }
+
+    modifier hasBalance(uint totalCost) {
+        require(msg.value >= totalCost, "doesn't have sufficient balance");
+        _;
+    }
+
+    modifier hasStock(uint _eventId, uint _numTickets) {
+        require(allEvents[_eventId].totalTickets > allEvents[_eventId].sales+_numTickets, "Ran out of tickets");
+        _;
+    }
+
+
+    constructor() public {
+        owner = msg.sender;
+    }
 
     /*
         Define a function called addEvent().
@@ -50,6 +88,20 @@ contract EventTicketsV2 {
             - return the event's ID
     */
 
+    function addEvent(string memory _description, string memory _url, uint totalTickets) public onlyOwner {
+
+        uint _eventId = idGenerator;
+        idGenerator++;
+
+        allEvents[_eventId].description = _description;
+        allEvents[_eventId].website = _url;
+        allEvents[_eventId].totalTickets = totalTickets;
+        allEvents[_eventId].isOpen = true;
+
+
+        emit LogEventAdded(_description, _url, totalTickets, _eventId);
+    }
+
     /*
         Define a function called readEvent().
         This function takes one parameter, the event ID.
@@ -60,6 +112,15 @@ contract EventTicketsV2 {
             4. sales
             5. isOpen
     */
+
+    function readEvent(uint eventId)
+        public
+        view
+        returns(string memory description, string memory website, uint totalTickets, uint sales, bool isOpen)
+    {
+        return (allEvents[eventId].description, allEvents[eventId].website, allEvents[eventId].totalTickets, allEvents[eventId].sales, allEvents[eventId].isOpen);
+    }
+
 
     /*
         Define a function called buyTickets().
@@ -75,7 +136,14 @@ contract EventTicketsV2 {
             - refunds any surplus value sent
             - emits the appropriate event
     */
+    function buyTickets(uint _eventId, uint numTickets) public isOpen(_eventId) hasBalance(PRICE_TICKET*numTickets) hasStock(_eventId, numTickets)  payable {
+        allEvents[_eventId].buyers[msg.sender] += numTickets;
+        allEvents[_eventId].sales += numTickets;
 
+        msg.sender.transfer(msg.value-PRICE_TICKET*numTickets);
+
+        emit LogBuyTickets(msg.sender, _eventId, numTickets);
+    }
     /*
         Define a function called getRefund().
         This function allows users to request a refund for a specific event.
@@ -86,13 +154,26 @@ contract EventTicketsV2 {
             - send appropriate value to the refund requester
             - emit the appropriate event
     */
+    function getRefund(uint _eventId) public payable {
+
+        require(allEvents[_eventId].buyers[msg.sender] > 0, "No tickets purchased");
+        uint numPurchased = allEvents[_eventId].buyers[msg.sender];
+        allEvents[_eventId].sales -= numPurchased;
+        allEvents[_eventId].buyers[msg.sender] = 0;
+
+        msg.sender.transfer(PRICE_TICKET*numPurchased);
+
+        emit LogGetRefund(msg.sender, _eventId, numPurchased);
+    }
 
     /*
         Define a function called getBuyerNumberTickets()
         This function takes one parameter, an event ID
         This function returns a uint, the number of tickets that the msg.sender has purchased.
     */
-
+    function getBuyerNumberTickets(uint _eventId) public view returns(uint) {
+        return allEvents[_eventId].buyers[msg.sender];
+    }
     /*
         Define a function called endSale()
         This function takes one parameter, the event ID
@@ -102,4 +183,10 @@ contract EventTicketsV2 {
             - transfer the balance from those event sales to the contract owner
             - emit the appropriate event
     */
+    function endSale(uint _eventId) public onlyOwner payable {
+        uint balance = PRICE_TICKET*allEvents[_eventId].sales;
+        delete allEvents[_eventId];
+        owner.transfer(balance);
+        emit LogEndSale(owner, balance, _eventId);
+    }
 }
